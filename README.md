@@ -10,5 +10,5 @@ pip install streamlit pandas numpy feedparser requests yfinance tenacity statsmo
 
 Then run the file using this command (enter blank if prompt for email)
 ```bash
-streamlit run model.py
+streamlit run First_Order_Situation_Awareness.py
 ```
