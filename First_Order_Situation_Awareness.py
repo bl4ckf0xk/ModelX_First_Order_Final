@@ -235,7 +235,7 @@ def main():
     
     # Optional: Use streamlit-autorefresh if installed
     if HAS_AUTOREFRESH:
-        st_autorefresh(interval=10000, key="datarefresh") # 10 seconds
+        st_autorefresh(interval=100000, key="datarefresh") # 10 seconds
 
     # Layout Header
     c1, c2 = st.columns([3, 1])
