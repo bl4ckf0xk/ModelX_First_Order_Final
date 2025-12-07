@@ -196,31 +196,38 @@ def compute_analytics(combined_df, social_trend, usd, oil):
         "total_posts": len(combined_df)
     }
 
-def generate_nlg(a):
-    msgs = []
-    # 1. FINANCE ADVICE (Forex & Investment)
-    if a['fx_anomaly']: 
-        msgs.append("💰 **Finance:** LKR volatility detected. **Action:** Pause non-essential USD payments & hedge currency risk.")
-    elif a['bsi'] > 80:
-        msgs.append("💰 **Finance:** Market stable. **Action:** Favorable window for capital expenditure (CapEx).")
+def render_scenario_brief(a):
+    st.markdown("### 🤖 AI Commander's Advice")
     
-    # 2. SUPPLY CHAIN ADVICE (Oil & Transport)
-    if a['oil_slope'] > 1.5: 
-        msgs.append("🚚 **Supply Chain:** Fuel prices trending UP. **Action:** Lock in forward transport contracts or bulk up inventory now.")
-    elif a['oil_slope'] < -1.5:
-        msgs.append("🚚 **Supply Chain:** Fuel costs dropping. **Action:** Renegotiate logistics rates for next month.")
+    alerts_triggered = False
 
-    # 3. HR & OPERATIONS ADVICE (Social Risk)
+    # RED ALERTS (CRITICAL RISKS)
+    if a['fx_anomaly']:
+        st.error("**💰 FINANCE ALERT:** Abnormal currency volatility detected.\n\n**Action:** Pause non-essential USD payments. Hedge currency exposure.", icon="💸")
+        alerts_triggered = True
+
     if a['social_risk'] or a['social_spike']:
-        risk_source = "Negative Sentiment" if a['social_risk'] else "Viral Discussions"
-        msgs.append(f"🛡️ **HR & Ops:** High social risk ({risk_source}). **Action:** Review staff commute safety & prepare for potential absenteeism.")
+        risk_type = "Viral Negative Discourse" if a['social_spike'] else "Public Unrest Signals"
+        st.error(f"**🛡️ OPERATIONS ALERT:** High social risk detected ({risk_type}).\n\n**Action:** Review employee commute safety. Prepare for absenteeism.", icon="🔥")
+        alerts_triggered = True
 
-    # Default 'All Clear'
-    if not msgs: 
-        msgs.append("✅ **Executive Summary:** No immediate threats. Standard operations advised across all units.")
+    if a['oil_slope'] > 1.5:
+        st.error("**🚚 LOGISTICS ALERT:** Oil prices are trending UP rapidly.\n\n**Action:** Lock in forward transport contracts now.", icon="🛢️")
+        alerts_triggered = True
+
+    # GREEN ALERTS (OPPORTUNITIES)
+    if a['oil_slope'] < -1.5:
+        st.success("**🚚 LOGISTICS OPPORTUNITY:** Fuel costs are trending DOWN.\n\n**Action:** Renegotiate logistics rates for next month.", icon="📉")
+        alerts_triggered = True
+
+    if not a['fx_anomaly'] and a['bsi'] > 80:
+        st.success("**📈 STRATEGIC OPPORTUNITY:** Market conditions are highly stable.\n\n**Action:** Favorable window for Capital Expenditure (CapEx).", icon="✅")
+        alerts_triggered = True
+
+    # GREY (STATUS QUO)
+    if not alerts_triggered:
+        st.info("**🛡️ STATUS QUO:** No immediate high-impact threats detected.\n\n**Action:** Continue standard operations. Monitor feeds.", icon="ℹ️")
         
-    return "  \n".join(msgs)
-
 # --- UI EXECUTION ---
 
 def main():
@@ -233,7 +240,7 @@ def main():
     # Layout Header
     c1, c2 = st.columns([3, 1])
     c1.markdown(f"**🔴 LIVE MONITORING** | Last Update: {datetime.now().strftime('%H:%M:%S')}")
-    if c2.button("🔄 Force Refresh"): st.rerun()
+    if c2.button("🔄 Force Refresh", type="primary"): st.rerun()
 
     with st.spinner("Analyzing real-time signals..."):
         # Init
@@ -253,26 +260,19 @@ def main():
         
         # Compute
         metrics = compute_analytics(combined_text, social_trend, usd_series, oil_series)
-        narrative = generate_nlg(metrics)
 
     # --- KPI ROW ---
+    st.divider()
     k1, k2, k3, k4 = st.columns(4)
-    
-    k1.metric("Stability Index (BSI)", f"{metrics['bsi']:.0f}/100", 
-              delta="Stable" if metrics['bsi']>75 else "Risk", delta_color="normal" if metrics['bsi']>75 else "inverse")
-    
-    k2.metric("LKR/USD", f"{metrics['curr_usd']:.2f}", 
-              delta="Volatile" if metrics['fx_anomaly'] else "Normal", delta_color="inverse" if metrics['fx_anomaly'] else "off")
-    
-    k3.metric("Oil (Brent)", f"${metrics['curr_oil']:.2f}", 
-              delta=f"{metrics['oil_slope']:.2f} Trend", delta_color="inverse" if metrics['oil_slope']>0 else "normal")
-    
-    k4.metric("Social Velocity", f"{metrics['social_slope']:.1f}", 
-              delta="Surge Detected" if metrics['social_spike'] else "Normal Activity", 
-              delta_color="inverse" if metrics['social_spike'] else "off")
+    k1.metric("Stability Index (BSI)", f"{metrics['bsi']:.0f}/100", delta="Stable" if metrics['bsi']>75 else "Risk", delta_color="normal" if metrics['bsi']>75 else "inverse")
+    k2.metric("LKR/USD", f"{metrics['curr_usd']:.2f}", delta="Volatile" if metrics['fx_anomaly'] else "Normal", delta_color="inverse" if metrics['fx_anomaly'] else "off")
+    k3.metric("Oil (Brent)", f"${metrics['curr_oil']:.2f}", delta=f"{metrics['oil_slope']:.2f} Trend", delta_color="inverse" if metrics['oil_slope']>0 else "normal")
+    k4.metric("Social Velocity", f"{metrics['social_slope']:.1f}", delta="Surge" if metrics['social_spike'] else "Normal", delta_color="inverse" if metrics['social_spike'] else "off")
 
-    st.success(f"### 🤖 AI Commander's Brief\n{narrative}")
-
+    # --- COLOR-CODED ADVICE SECTION ---
+    # We call the renderer function here instead of st.success
+    render_scenario_brief(metrics)
+    
     # --- CHARTS ROW ---
     left, right = st.columns(2)
     
