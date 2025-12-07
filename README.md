@@ -5,7 +5,7 @@ To run the file please follow these steps
 
 First install required python dependencies
 ```bash
-pip install streamlit pandas numpy feedparser requests yfinance tenacity statsmodels scikit-learn vaderSentiment
+pip install streamlit pandas numpy feedparser requests yfinance tenacity statsmodels scikit-learn vaderSentiment streamlit-autorefresh
 ```
 
 Then run the file using this command (enter blank if prompt for email)
