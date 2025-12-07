@@ -198,20 +198,27 @@ def compute_analytics(combined_df, social_trend, usd, oil):
 
 def generate_nlg(a):
     msgs = []
-    if a['fx_anomaly']: msgs.append("💸 **Forex Warning:** LKR/USD volatility detected.")
+    # 1. FINANCE ADVICE (Forex & Investment)
+    if a['fx_anomaly']: 
+        msgs.append("💰 **Finance:** LKR volatility detected. **Action:** Pause non-essential USD payments & hedge currency risk.")
+    elif a['bsi'] > 80:
+        msgs.append("💰 **Finance:** Market stable. **Action:** Favorable window for capital expenditure (CapEx).")
     
+    # 2. SUPPLY CHAIN ADVICE (Oil & Transport)
+    if a['oil_slope'] > 1.5: 
+        msgs.append("🚚 **Supply Chain:** Fuel prices trending UP. **Action:** Lock in forward transport contracts or bulk up inventory now.")
+    elif a['oil_slope'] < -1.5:
+        msgs.append("🚚 **Supply Chain:** Fuel costs dropping. **Action:** Renegotiate logistics rates for next month.")
+
+    # 3. HR & OPERATIONS ADVICE (Social Risk)
     if a['social_risk'] or a['social_spike']:
-        risk_type = "High Volume" if a['social_spike'] else "Negative Sentiment"
-        msgs.append(f"🔥 **Social Signal:** {risk_type} detected on Social Media. Monitoring for protests/unrest.")
+        risk_source = "Negative Sentiment" if a['social_risk'] else "Viral Discussions"
+        msgs.append(f"🛡️ **HR & Ops:** High social risk ({risk_source}). **Action:** Review staff commute safety & prepare for potential absenteeism.")
+
+    # Default 'All Clear'
+    if not msgs: 
+        msgs.append("✅ **Executive Summary:** No immediate threats. Standard operations advised across all units.")
         
-    if a['oil_slope'] > 1.5: msgs.append("🛢️ **Cost Alert:** Oil prices trending UP. Logistics costs may rise.")
-    elif a['oil_slope'] < -1.5: msgs.append("✅ **Cost Benefit:** Oil prices trending down. Potential logistics savings.")
-    
-    if not msgs and a['bsi'] > 80:
-        msgs.append("✅ **Opportunity:** Stable environment detected. Optimal for business expansion.")
-    
-    if not msgs: msgs.append("🛡️ **Status Quo:** Normal operations advised.")
-    
     return "  \n".join(msgs)
 
 # --- UI EXECUTION ---
