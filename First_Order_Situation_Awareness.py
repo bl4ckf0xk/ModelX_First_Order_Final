@@ -78,7 +78,7 @@ class MarketDataIngestor:
         except:
             return pd.Series(dtype=float)
 
-    def fetch_hydro_status(self):
+    def fetch_oil_price(self):
         try:
             # Brent Crude Oil Futures (Global Benchmark)
             # Impact: Rising oil -> Higher transport/energy costs in SL
