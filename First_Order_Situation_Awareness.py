@@ -115,7 +115,7 @@ def process_social_trend(social_df):
     
     # 2. Resample by Hour to get 'Velocity' of discussions
     # We sum the 'score' (Upvotes + Comments) to see intensity
-    trend = df['score'].resample('2H').sum().fillna(0)
+    trend = df['score'].resample('2h').sum().fillna(0)
     
     # Return the last 12 periods (24 hours)
     return trend.tail(12)
