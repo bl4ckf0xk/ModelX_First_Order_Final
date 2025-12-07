@@ -163,7 +163,7 @@ def compute_analytics(news_df, usd_series, oil_series):
 
     return {
         "bsi": bsi,
-        "grid_slope": slope,
+        "oil_slope": slope,
         "sentiment": sentiment_score,
         "social_risk": social_risk,
         "keywords": keywords,
