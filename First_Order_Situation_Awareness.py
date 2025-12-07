@@ -16,7 +16,7 @@ from sklearn.cluster import KMeans
 from streamlit_autorefresh import st_autorefresh
 
 # Configure Page
-st.set_page_config(page_title="ModelX: Live Situational Awareness", layout="wide", page_icon="🇱🇰")
+st.set_page_config(page_title="First Order: Live Situational Awareness", layout="wide", page_icon="🇱🇰")
 
 # --- TIER 1: RESILIENT SENSOR LAYER ---
 
@@ -72,7 +72,7 @@ class NewsIngestor(BaseScraper):
 class SocialPulseIngestor(BaseScraper):
     def fetch_reddit_trends(self):
         # Fetches top discussions from r/srilanka
-        url = "https://www.reddit.com/r/srilanka/hot.json?limit=10"
+        url = "https://www.reddit.com/r/srilanka/hot.json?limit=100"
         try:
             # unique user agent is required by Reddit
             headers = {'User-Agent': 'ModelX-Dashboard/1.0'}
@@ -85,10 +85,13 @@ class SocialPulseIngestor(BaseScraper):
                 # Filter for high engagement
                 if post['num_comments'] > 10:
                     posts.append({
+                        "source": "Reddit (r/srilanka)",
                         "title": post['title'],
-                        "score": post['score'],
+                        "score": post['score'] + post['num_comments'],
                         "comments": post['num_comments'],
-                        "url": f"https://reddit.com{post['permalink']}"
+                        "published": datetime.fromtimestamp(post['created_utc']),
+                        "link": f"https://reddit.com{post['permalink']}",
+                        "type": "social"
                     })
             return pd.DataFrame(posts)
         except Exception as e:
@@ -129,16 +132,32 @@ def train_and_detect_anomalies(history_series):
     prediction = clf.predict(latest_value)[0]
     return prediction == -1 
 
+def process_social_trend(social_df):
+    """Generates a time-series of social engagement over the last 24h"""
+    if social_df.empty: return pd.Series(dtype=float)
+    
+    # 1. Convert to datetime
+    df = social_df.copy()
+    df['published'] = pd.to_datetime(df['published'])
+    df.set_index('published', inplace=True)
+    
+    # 2. Resample by Hour to get 'Velocity' of discussions
+    # We sum the 'score' (Upvotes + Comments) to see intensity
+    trend = df['score'].resample('2H').sum().fillna(0)
+    
+    # Return the last 12 periods (24 hours)
+    return trend.tail(12)
+    
 def analyze_news_sentiment(news_df):
     analyzer = SentimentIntensityAnalyzer()
     
     if news_df.empty: return 0, False, []
 
     scores = []
-    crisis_keywords = ["protest", "strike", "crisis", "curfew", "violence", "shortage"]
+    crisis_keywords = ["protest", "strike", "crisis", "curfew", "violence", "shortage", "power cut", "fuel"]
     triggered_keywords = []
 
-    for title in news_df['title'].head(15):
+    for title in news_df['title'].head(20):
         vs = analyzer.polarity_scores(title)
         scores.append(vs['compound'])
         for k in crisis_keywords:
@@ -146,7 +165,7 @@ def analyze_news_sentiment(news_df):
                 triggered_keywords.append(k)
 
     avg_sentiment = np.mean(scores) if scores else 0
-    is_critical = (avg_sentiment < -0.2) or (len(triggered_keywords) > 0)
+    is_critical = (avg_sentiment < -0.2) or (len(triggered_keywords) > 1)
     
     return avg_sentiment, is_critical, list(set(triggered_keywords))
 
@@ -166,32 +185,36 @@ def cluster_news_topics(news_df):
     news_df['topic_cluster'] = kmeans.labels_
     return news_df
     
-def compute_analytics(news_df, usd_series, oil_series):
+def compute_analytics(news_df, social_trend, usd_series, oil_series):
     # 1. ML Anomaly Detection
     fx_anomaly = train_and_detect_anomalies(usd_series)
     
     # 2. NLP Sentiment Analysis
     sentiment_score, social_risk, keywords = analyze_news_sentiment(news_df)
 
-    # 3. Statistical Trend on Oil
-    slope = 0
-    trend = oil_series
-    if not oil_series.empty:
+    # 3. Trend Slops
+    oil_slope = 0
+    if not oil.empty:
         try:
-            # Decompose to find the underlying trend (ignoring daily noise)
-            stl = STL(oil_series, period=5, robust=True)
+            stl = STL(oil, period=5, robust=True)
             res = stl.fit()
-            trend = res.trend
-            # Calculate slope (Price change over last 4 days)
-            slope = trend.iloc[-1] - trend.iloc[-4]
-        except:
-            pass # Keep default
+            oil_slope = res.trend.iloc[-1] - res.trend.iloc[-4]
+        except: pass
+            
+    social_spike = False
+    social_slope = 0
+    if len(social_trend) > 2:
+        # Compare last 2 hours to average
+        current_vol = social_trend.iloc[-1]
+        avg_vol = social_trend.mean()
+        social_slope = current_vol - avg_vol
+        if current_vol > (avg_vol * 1.5): social_spike = True # 50% spike in chatter
 
     # 4. SL-BSI (Business Stability Index) Calculation
     base_score = 100
 
     # Penalty: FX Volatility (Unstable currency)
-    if fx_anomaly: base_score -= 25
+    if fx_anomaly: base_score -= 20
 
     # Penalty: Social Unrest (Protests/Strikes)
     if social_risk: base_score -= 25
@@ -214,7 +237,8 @@ def compute_analytics(news_df, usd_series, oil_series):
         "fx_anomaly": fx_anomaly,
         "trend_data": trend,
         "current_usd": usd_series.iloc[-1] if not usd_series.empty else 0,
-        "current_oil": oil_series.iloc[-1] if not oil_series.empty else 0
+        "current_oil": oil_series.iloc[-1] if not oil_series.empty else 0,
+        "total_posts": len(combined_df)
     }
 
 # --- TIER 3: INSIGHT GENERATION (NLG) ---
@@ -251,7 +275,7 @@ def generate_nlg(analytics):
 # --- UI EXECUTION ---
 
 def main():
-    st.title("🇱🇰 ModelX: Real-Time Intelligence")
+    st.title("🇱🇰 First Order: Real-Time Intelligence Platform")
 
     # Auto-refresh every 60 seconds
     count = st_autorefresh(interval=60000, key="fizzbuzzcounter")
@@ -264,15 +288,21 @@ def main():
 
     with st.spinner("Aggregating multi-source intelligence..."):
         news_ingestor = NewsIngestor()
+        social_ingestor = SocialPulseIngestor()
         market_ingestor = MarketDataIngestor()
 
         # Fetch Data
         news_df = news_ingestor.fetch_live_news()
+        social_df = social_ingestor.fetch_reddit_trends()
+
+        # Combine text data for analysis
+        combined_text_df = pd.concat([news_df, social_df], ignore_index=True)
+        
         usd_series = market_ingestor.fetch_usd_lkr()
         oil_series = market_ingestor.fetch_oil_price()
 
         # Compute
-        metrics = compute_analytics(news_df, usd_series, oil_series)
+        metrics = compute_analytics(combined_text_df, usd_series, oil_series)
         narrative = generate_nlg(metrics)
 
     kpi1, kpi2, kpi3 = st.columns(3)
@@ -293,10 +323,13 @@ def main():
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("📡 Live News Signals")
-        if not news_df.empty:
-            for i, row in news_df.head(5).iterrows():
+        if not combined_text_df.empty:
+            # Sort by time
+            combined_text_df = combined_text_df.sort_values(by="published", ascending=False)
+            for i, row in combined_text_df.head(6).iterrows():
                 title = row['title']
                 source = row['source']
+                icon = "📰" if row['type'] == "news" else "🗣️"
                 st.markdown(f"**{row['source']}**: {title} *({row['published'].strftime('%H:%M')})*")
         else:
             st.warning("No live news available right now.")
@@ -305,6 +338,13 @@ def main():
         st.subheader("🛢️ Oil Price Trend (STL)")
         st.line_chart(metrics['trend_data'])
         st.caption("Underlying price trend (removing daily market noise). Rising trend = Inflationary Pressure.")
+
+    # --- AUTO REFRESH LOGIC ---
+    # Display a countdown or status
+    st.divider()
+    st.caption(f"Next update in 10 seconds...")
+    time.sleep(10) # Wait for 10 seconds
+    st.rerun()     # Restart the script to fetch new data
 
 if __name__ == "__main__":
     main()
