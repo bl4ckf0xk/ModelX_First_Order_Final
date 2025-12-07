@@ -11,6 +11,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from statsmodels.tsa.seasonal import STL
 from sklearn.ensemble import IsolationForest
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+from streamlit_autorefresh import st_autorefresh
 
 # Configure Page
 st.set_page_config(page_title="ModelX: Live Situational Awareness", layout="wide", page_icon="🇱🇰")
@@ -66,6 +69,31 @@ class NewsIngestor(BaseScraper):
 
         return pd.DataFrame(news_items).sort_values(by="published", ascending=False)
 
+class SocialPulseIngestor(BaseScraper):
+    def fetch_reddit_trends(self):
+        # Fetches top discussions from r/srilanka
+        url = "https://www.reddit.com/r/srilanka/hot.json?limit=10"
+        try:
+            # unique user agent is required by Reddit
+            headers = {'User-Agent': 'ModelX-Dashboard/1.0'}
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json()
+            
+            posts = []
+            for item in data['data']['children']:
+                post = item['data']
+                # Filter for high engagement
+                if post['num_comments'] > 10:
+                    posts.append({
+                        "title": post['title'],
+                        "score": post['score'],
+                        "comments": post['num_comments'],
+                        "url": f"https://reddit.com{post['permalink']}"
+                    })
+            return pd.DataFrame(posts)
+        except Exception as e:
+            return pd.DataFrame()
+            
 class MarketDataIngestor:
     def fetch_usd_lkr(self):
         try:
@@ -122,6 +150,22 @@ def analyze_news_sentiment(news_df):
     
     return avg_sentiment, is_critical, list(set(triggered_keywords))
 
+def cluster_news_topics(news_df):
+    if len(news_df) < 5: return news_df # Not enough data to cluster
+    
+    # 1. Convert headlines to numbers (Vectors)
+    vectorizer = TfidfVectorizer(stop_words='english')
+    X = vectorizer.fit_transform(news_df['title'])
+    
+    # 2. Group into 3 main clusters (Topics)
+    k = 3
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(X)
+    
+    # 3. Assign Cluster IDs to the dataframe
+    news_df['topic_cluster'] = kmeans.labels_
+    return news_df
+    
 def compute_analytics(news_df, usd_series, oil_series):
     # 1. ML Anomaly Detection
     fx_anomaly = train_and_detect_anomalies(usd_series)
@@ -208,6 +252,9 @@ def generate_nlg(analytics):
 
 def main():
     st.title("🇱🇰 ModelX: Real-Time Intelligence")
+
+    # Auto-refresh every 60 seconds
+    count = st_autorefresh(interval=60000, key="fizzbuzzcounter")
     
     if st.button("🔄 Refresh Data Now"):
         st.rerun()
