@@ -72,17 +72,23 @@ class MarketDataIngestor:
             ticker = yf.Ticker("LKR=X")
             hist = ticker.history(period="1mo")
             if hist.empty:
-                dates = pd.date_range(end=datetime.now(), periods=30)
-                return pd.Series(np.linspace(290, 300, 30), index=dates)
+                # Fallback only if API fails, but ideally, this keeps retrying
+                return pd.Series(dtype=float)
             return hist['Close']
         except:
             return pd.Series(dtype=float)
 
     def fetch_hydro_status(self):
-        dates = pd.date_range(end=datetime.now(), periods=30)
-        trend = np.linspace(65, 45, 30) 
-        noise = np.random.normal(0, 1.5, 30)
-        return pd.Series(trend + noise, index=dates)
+        try:
+            # Brent Crude Oil Futures (Global Benchmark)
+            # Impact: Rising oil -> Higher transport/energy costs in SL
+            ticker = yf.Ticker("BZ=F") 
+            hist = ticker.history(period="1mo")
+            if hist.empty:
+                return pd.Series(dtype=float)
+            return hist['Close']
+        except:
+            return pd.Series(dtype=float)
 
 # --- TIER 2: INTELLIGENT PROCESSING LAYER ---
 
@@ -116,28 +122,41 @@ def analyze_news_sentiment(news_df):
     
     return avg_sentiment, is_critical, list(set(triggered_keywords))
 
-def compute_analytics(news_df, usd_series, hydro_series):
+def compute_analytics(news_df, usd_series, oil_series):
     # 1. ML Anomaly Detection
     fx_anomaly = train_and_detect_anomalies(usd_series)
     
     # 2. NLP Sentiment Analysis
     sentiment_score, social_risk, keywords = analyze_news_sentiment(news_df)
-    
-    # 3. Statistical Trend
-    try:
-        stl = STL(hydro_series, period=7, robust=True)
-        res = stl.fit()
-        trend = res.trend
-        slope = trend.iloc[-1] - trend.iloc[-4]
-    except:
-        trend = hydro_series
-        slope = 0
 
-    # 4. SL-BSI Calculation
+    # 3. Statistical Trend on Oil
+    slope = 0
+    trend = oil_series
+    if not oil_series.empty:
+        try:
+            # Decompose to find the underlying trend (ignoring daily noise)
+            stl = STL(oil_series, period=5, robust=True)
+            res = stl.fit()
+            trend = res.trend
+            # Calculate slope (Price change over last 4 days)
+            slope = trend.iloc[-1] - trend.iloc[-4]
+        except:
+            pass # Keep default
+
+    # 4. SL-BSI (Business Stability Index) Calculation
     base_score = 100
+
+    # Penalty: FX Volatility (Unstable currency)
     if fx_anomaly: base_score -= 25
+
+    # Penalty: Social Unrest (Protests/Strikes)
     if social_risk: base_score -= 25
-    if slope < -1: base_score -= 15
+
+    # Penalty: Rising Oil Prices (Operational Cost Spike)
+    # If oil price increased by more than $2 in the trend recently
+    if slope > 2.0: base_score -= 15
+    
+    # Bonus: Good Sentiment
     if not news_df.empty and sentiment_score > 0.2: base_score += 10 
 
     bsi = max(0, min(100, base_score))
@@ -150,21 +169,31 @@ def compute_analytics(news_df, usd_series, hydro_series):
         "keywords": keywords,
         "fx_anomaly": fx_anomaly,
         "trend_data": trend,
-        "current_usd": usd_series.iloc[-1] if not usd_series.empty else 0
+        "current_usd": usd_series.iloc[-1] if not usd_series.empty else 0,
+        "current_oil": oil_series.iloc[-1] if not oil_series.empty else 0
     }
 
 # --- TIER 3: INSIGHT GENERATION (NLG) ---
 
 def generate_nlg(analytics):
     msgs = []
+
+    # Forex Logic
     if analytics['fx_anomaly']:
         msgs.append("💸 **Forex Warning:** AI model detected abnormal volatility in LKR/USD. Hedge exposure.")
+
+    # Social Logic
     if analytics['social_risk']:
         kws = ", ".join(analytics['keywords'])
         msgs.append(f"🔥 **Social Risk:** Negative sentiment detected. Keywords: {kws}.")
-    if analytics['grid_slope'] < -1.5:
-        msgs.append(f"⚡ **Energy Risk:** Hydro storage dropping fast (Slope: {analytics['grid_slope']:.2f}). Expect power cuts.")
+    # Oil/Energy Logic
+    # Slope > 1 means prices are trending UP
+    if analytics['oil_slope'] > 1.5:
+        msgs.append(f"🛢️ **Supply Chain Risk:** Global Oil prices are rallying (Trend: +${analytics['oil_slope']:.2f}). Expect transport cost increases.")
+    elif analytics['oil_slope'] < -1.5:
+        msgs.append(f"✅ **Cost Benefit:** Oil prices are trending down. Potential savings on logistics.")
 
+    # General Stability Logic
     if not analytics['fx_anomaly'] and analytics['bsi'] > 80:
         msgs.append("✅ **Opportunity:** Market conditions are highly stable. Good window for capital investments.")
     if analytics['sentiment'] > 0.5:
@@ -190,10 +219,13 @@ def main():
         news_ingestor = NewsIngestor()
         market_ingestor = MarketDataIngestor()
 
+        # Fetch Data
         news_df = news_ingestor.fetch_live_news()
         usd_series = market_ingestor.fetch_usd_lkr()
-        hydro_series = market_ingestor.fetch_hydro_status()
-        metrics = compute_analytics(news_df, usd_series, hydro_series)
+        oil_series = market_ingestor.fetch_oil_price()
+
+        # Compute
+        metrics = compute_analytics(news_df, usd_series, oil_series)
         narrative = generate_nlg(metrics)
 
     kpi1, kpi2, kpi3 = st.columns(3)
@@ -202,10 +234,12 @@ def main():
                 delta_color="normal" if metrics['bsi'] > 75 else "inverse")
     
     kpi2.metric("LKR/USD", f"{metrics['current_usd']:.2f}", 
-                delta="Anomaly Detected" if metrics['fx_anomaly'] else "Normal Pattern",
-                delta_color="off" if metrics['fx_anomaly'] else "normal")
+                delta="Volatility Alert" if metrics['fx_anomaly'] else "Normal",
+                delta_color="inverse" if metrics['fx_anomaly'] else "off")
     
-    kpi3.metric("Hydro Trend", f"{metrics['grid_slope']:.2f}", "Gradient")
+    kpi3.metric("Global Oil (Brent)", f"${metrics['current_oil']:.2f}", 
+                delta=f"{metrics['oil_slope']:.2f} Trend",
+                delta_color="inverse" if metrics['oil_slope'] > 0 else "normal")
 
     st.success(f"### 🤖 AI Commander's Brief\n{narrative}")
 
@@ -215,14 +249,15 @@ def main():
         if not news_df.empty:
             for i, row in news_df.head(5).iterrows():
                 title = row['title']
+                source = row['source']
                 st.markdown(f"**{row['source']}**: {title} *({row['published'].strftime('%H:%M')})*")
         else:
             st.warning("No live news available right now.")
     
     with c2:
-        st.subheader("📉 Seasonal Trend Analysis (STL)")
+        st.subheader("🛢️ Oil Price Trend (STL)")
         st.line_chart(metrics['trend_data'])
-        st.caption("Decomposed trend component (Removing daily noise)")
+        st.caption("Underlying price trend (removing daily market noise). Rising trend = Inflationary Pressure.")
 
 if __name__ == "__main__":
     main()
